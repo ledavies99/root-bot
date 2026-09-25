@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#d06a2c"         # Fox / Marquise Orange
+backgroundColor = "#1a2315"      # Deep Forest Green
+secondaryBackgroundColor = "#2d3a24" # Moss Green for sidebars/cards
+textColor = "#f4ebd0"            # Parchment / Cream Text
+font = "sans serif"
