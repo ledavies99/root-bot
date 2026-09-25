@@ -15,7 +15,10 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
 
 
 @st.cache_resource
@@ -62,13 +65,29 @@ def get_vector_store(
             )
         )
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
-    chunks = text_splitter.split_documents(documents)
+    headers_to_split_on = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
+    markdown_splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=headers_to_split_on
+    )
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=600, chunk_overlap=120, separators=["\n\n", "\n", "* ", " ", ""]
+    )
+
+    header_split_docs = []
+    for doc in documents:
+        md_chunks = markdown_splitter.split_text(doc.page_content)
+        for md_doc in md_chunks:
+            md_doc.metadata["source"] = doc.metadata["source"]
+            header_split_docs.append(md_doc)
+
+    chunks = text_splitter.split_documents(header_split_docs)
 
     print(f"📥 Building Chroma database with {len(chunks)} chunks...")
     vector_store = Chroma.from_documents(
         documents=chunks, embedding=embeddings, persist_directory=db_dir
     )
+
     return vector_store
 
 
@@ -97,7 +116,7 @@ def initialize_directory_rules_bot(
         "Your job is to answer rules questions accurately using the provided text segments.\n\n"
         "CRITICAL INSTRUCTIONS:\n"
         "1. Apply strict, literal board game logic to the context provided.\n"
-        "2. If the text explicitly states a rule, quote or cite the rule number (e.g., Rule 4.3).\n"
+        "2. Cite the source file and specific rule section provided in the [Source: ... | Section: ...] headers when justifying your answer.\n"
         "3. If multiple rules interact, explain their intersection step-by-step using the provided text.\n"
         "4. If the context completely lacks information to address the question, only then state that you cannot find an official ruling.\n"
         "5. PREREQUISITE CHAIN ANALYSIS: When evaluating if a major faction action (like an Alliance Revolt) can be performed in a restricted clearing (like the Keep), you must work backward and check the prerequisite board state first:\n"
@@ -123,10 +142,23 @@ def initialize_directory_rules_bot(
     def run_rag_pipeline(user_query: str):
         docs = vector_store.search(user_query, search_type="mmr", k=10, fetch_k=25)
 
-        context_text = "\n\n---\n\n".join([doc.page_content for doc in docs])
-        print(
-            "📖 [Debug] Reading context from: {doc.metadata.get('source') for doc in docs}"
-        )
+        formatted_chunks = []
+        for doc in docs:
+            source_file = doc.metadata.get("source", "Unknown Source")
+
+            headers = [
+                doc.metadata.get(h)
+                for h in ["Header 1", "Header 2", "Header 3"]
+                if doc.metadata.get(h)
+            ]
+            header_path = " > ".join(headers) if headers else "General Section"
+
+            chunk_str = (
+                f"[Source: {source_file} | Section: {header_path}]\n{doc.page_content}"
+            )
+            formatted_chunks.append(chunk_str)
+
+        context_text = "\n\n---\n\n".join(formatted_chunks)
 
         formatted_prompt = prompt.format_messages(
             context=context_text, input=user_query

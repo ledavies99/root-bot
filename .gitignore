@@ -8,3 +8,4 @@ wheels/
 .env
 root_vector_db/
 __pycache__/
+.streamlit/secrets.toml
